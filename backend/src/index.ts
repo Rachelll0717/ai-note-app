@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import ollama from 'ollama';
 
 dotenv.config();
 
@@ -18,11 +18,7 @@ const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 初始化 Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-// 调用 AI 生成摘要和标签
+// 调用本地 Ollama 生成摘要和标签
 async function generateAISummaryAndTags(content: string) {
   const prompt = `
 你是一个笔记助手。请分析以下笔记内容，完成两件事：
@@ -40,17 +36,20 @@ ${content}
 `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = result.response.text();
-    // 提取 JSON 部分（处理可能包含的 markdown 格式）
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    const response = await ollama.chat({
+      model: 'qwen2.5:3b',  // 或者你本地有的其他模型，如 llama3.2, deepseek-r1:1.5b 等
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const resultText = response.message.content || '';
+    const jsonMatch = resultText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
-    return { summary: "无法生成摘要", tags: [] };
+    return { summary: "无法解析AI响应", tags: [] };
   } catch (error) {
     console.error("AI 调用失败:", error);
-    return { summary: "AI 服务暂不可用", tags: [] };
+    return { summary: "AI 服务错误", tags: [] };
   }
 }
 
@@ -74,7 +73,7 @@ app.get('/api/notes', async (req, res) => {
   }
 });
 
-// 创建新笔记（自动调用 AI）
+// 创建新笔记
 app.post('/api/notes', async (req, res) => {
   const { title, content } = req.body;
   
@@ -84,18 +83,11 @@ app.post('/api/notes', async (req, res) => {
   }
   
   try {
-    // 1. 调用 AI 生成摘要和标签
     const { summary, tags } = await generateAISummaryAndTags(content);
     
-    // 2. 存入数据库
     const { data, error } = await supabase
       .from('notes')
-      .insert([{ 
-        title, 
-        content, 
-        summary, 
-        tags 
-      }])
+      .insert([{ title, content, summary, tags }])
       .select()
       .single();
     
@@ -130,7 +122,6 @@ app.post('/api/notes/:id/regenerate', async (req, res) => {
   const { id } = req.params;
   
   try {
-    // 1. 先获取原笔记内容
     const { data: note, error: fetchError } = await supabase
       .from('notes')
       .select('content')
@@ -143,10 +134,8 @@ app.post('/api/notes/:id/regenerate', async (req, res) => {
       return;
     }
     
-    // 2. 重新调用 AI
     const { summary, tags } = await generateAISummaryAndTags(note.content);
     
-    // 3. 更新数据库
     const { data, error } = await supabase
       .from('notes')
       .update({ summary, tags, updated_at: new Date() })
