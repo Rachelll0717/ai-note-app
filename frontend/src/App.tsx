@@ -9,6 +9,7 @@ interface Note {
   summary: string | null;
   tags: string[];
   created_at: string;
+  updated_at: string;
 }
 
 const API_URL = 'http://localhost:3001/api';
@@ -20,6 +21,12 @@ function App() {
   const [newContent, setNewContent] = useState('');
   const [creating, setCreating] = useState(false);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+
+  // 编辑相关 state
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [updating, setUpdating] = useState(false);
 
   // 获取所有笔记
   const fetchNotes = async () => {
@@ -69,6 +76,58 @@ function App() {
     } finally {
       setGeneratingId(null);
     }
+  };
+
+  // 删除笔记
+  const deleteNote = async (id: string) => {
+    if (!confirm('确定删除这篇笔记吗？')) return;
+    
+    try {
+      await axios.delete(`${API_URL}/notes/${id}`);
+      setNotes(notes.filter(note => note.id !== id));
+    } catch (error) {
+      console.error('删除失败:', error);
+      alert('删除失败');
+    }
+  };
+
+  // 开始编辑
+  const startEdit = (note: Note) => {
+    setEditingNote(note);
+    setEditTitle(note.title);
+    setEditContent(note.content);
+  };
+
+  // 保存编辑
+  const saveEdit = async () => {
+    if (!editingNote) return;
+    if (!editTitle.trim() || !editContent.trim()) return;
+    
+    setUpdating(true);
+    try {
+      const response = await axios.put(`${API_URL}/notes/${editingNote.id}`, {
+        title: editTitle,
+        content: editContent,
+      });
+      setNotes(notes.map(note => 
+        note.id === editingNote.id ? response.data : note
+      ));
+      setEditingNote(null);
+      setEditTitle('');
+      setEditContent('');
+    } catch (error) {
+      console.error('更新失败:', error);
+      alert('更新失败');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  // 取消编辑
+  const cancelEdit = () => {
+    setEditingNote(null);
+    setEditTitle('');
+    setEditContent('');
   };
 
   useEffect(() => {
@@ -130,19 +189,53 @@ function App() {
               </div>
               
               <div className="note-footer">
-                <small>{new Date(note.created_at).toLocaleString()}</small>
-                <button 
-                  className="regenerate-btn"
-                  onClick={() => regenerateAI(note.id)}
-                  disabled={generatingId === note.id}
-                >
-                  {generatingId === note.id ? '生成中...' : '🔄 重新生成'}
-                </button>
+                <small>
+                  创建: {new Date(note.created_at).toLocaleString()}
+                  {note.updated_at !== note.created_at && ` | 更新: ${new Date(note.updated_at).toLocaleString()}`}
+                </small>
+                <div className="note-actions">
+                  <button className="edit-btn" onClick={() => startEdit(note)}>✏️ 编辑</button>
+                  <button className="delete-btn" onClick={() => deleteNote(note.id)}>🗑️ 删除</button>
+                  <button 
+                    className="regenerate-btn"
+                    onClick={() => regenerateAI(note.id)}
+                    disabled={generatingId === note.id}
+                  >
+                    {generatingId === note.id ? '生成中...' : '🔄 重新生成'}
+                  </button>
+                </div>
               </div>
             </div>
           ))
         )}
       </div>
+
+      {/* 编辑弹窗 */}
+      {editingNote && (
+        <div className="modal-overlay" onClick={cancelEdit}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>编辑笔记</h2>
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              placeholder="标题"
+            />
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              rows={8}
+              placeholder="内容"
+            />
+            <div className="modal-buttons">
+              <button onClick={cancelEdit}>取消</button>
+              <button onClick={saveEdit} disabled={updating}>
+                {updating ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

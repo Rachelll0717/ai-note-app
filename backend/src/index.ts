@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import ollama from 'ollama';
+import OpenAI from 'openai';
 
 dotenv.config();
 
@@ -18,7 +18,15 @@ const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 调用本地 Ollama 生成摘要和标签
+console.log('API Key exists?', !!process.env.SILICONFLOW_API_KEY);
+
+// 初始化硅基流动
+const siliconflow = new OpenAI({
+  apiKey: process.env.SILICONFLOW_API_KEY,
+  baseURL: 'https://api.siliconflow.cn/v1',
+});
+
+// 调用 AI 生成摘要和标签
 async function generateAISummaryAndTags(content: string) {
   const prompt = `
 你是一个笔记助手。请分析以下笔记内容，完成两件事：
@@ -36,12 +44,13 @@ ${content}
 `;
 
   try {
-    const response = await ollama.chat({
-      model: 'qwen2.5:3b',  // 或者你本地有的其他模型，如 llama3.2, deepseek-r1:1.5b 等
+    const response = await siliconflow.chat.completions.create({
+      model: 'Qwen/Qwen2.5-7B-Instruct',
       messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
     });
 
-    const resultText = response.message.content || '';
+    const resultText = response.choices[0]?.message?.content || '';
     const jsonMatch = resultText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
@@ -49,9 +58,11 @@ ${content}
     return { summary: "无法解析AI响应", tags: [] };
   } catch (error) {
     console.error("AI 调用失败:", error);
-    return { summary: "AI 服务错误", tags: [] };
+    return { summary: "AI 服务暂不可用", tags: [] };
   }
 }
+
+// ========== API 路由 ==========
 
 // 健康检查
 app.get('/health', (req, res) => {
@@ -114,6 +125,53 @@ app.get('/api/notes/:id', async (req, res) => {
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch note' });
+  }
+});
+
+// 更新笔记
+app.put('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  const { title, content } = req.body;
+  
+  try {
+    const aiResult = await generateAISummaryAndTags(content);
+    const { summary, tags } = aiResult;
+    
+    const { data, error } = await supabase
+      .from('notes')
+      .update({ 
+        title, 
+        content, 
+        summary, 
+        tags,
+        updated_at: new Date()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('更新笔记失败:', error);
+    res.status(500).json({ error: 'Failed to update note' });
+  }
+});
+
+// 删除笔记
+app.delete('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const { error } = await supabase
+      .from('notes')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete note' });
   }
 });
 
