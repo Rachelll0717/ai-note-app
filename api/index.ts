@@ -7,14 +7,20 @@ const app = express();
 app.use(express.json());
 
 // 初始化 Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables');
+}
+const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
 
 // 初始化硅基流动
+const siliconflowApiKey = process.env.SILICONFLOW_API_KEY;
+if (!siliconflowApiKey) {
+  console.error('Missing SILICONFLOW_API_KEY environment variable');
+}
 const siliconflow = new OpenAI({
-  apiKey: process.env.SILICONFLOW_API_KEY,
+  apiKey: siliconflowApiKey,
   baseURL: 'https://api.siliconflow.cn/v1',
 });
 
@@ -44,13 +50,17 @@ ${content}
 
     const resultText = response.choices[0]?.message?.content || '';
     const jsonMatch = resultText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
     return { summary: "无法解析AI响应", tags: [] };
   } catch (error) {
     console.error("AI 调用失败:", error);
     return { summary: "AI 服务暂不可用", tags: [] };
   }
 }
+
+// ========== API 路由 ==========
 
 // 健康检查
 app.get('/api/health', (req, res) => {
@@ -67,6 +77,7 @@ app.get('/api/notes', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    console.error('获取笔记失败:', error);
     res.status(500).json({ error: 'Failed to fetch notes' });
   }
 });
@@ -109,6 +120,7 @@ app.put('/api/notes/:id', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    console.error('更新笔记失败:', error);
     res.status(500).json({ error: 'Failed to update note' });
   }
 });
@@ -121,6 +133,7 @@ app.delete('/api/notes/:id', async (req, res) => {
     if (error) throw error;
     res.json({ success: true });
   } catch (error) {
+    console.error('删除笔记失败:', error);
     res.status(500).json({ error: 'Failed to delete note' });
   }
 });
@@ -148,11 +161,12 @@ app.post('/api/notes/:id/regenerate', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    console.error('重新生成失败:', error);
     res.status(500).json({ error: 'Failed to regenerate' });
   }
 });
 
-// Vercel 需要导出的 handler
+// Vercel handler 导出
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   await app(req, res);
 }
