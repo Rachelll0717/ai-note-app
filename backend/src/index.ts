@@ -63,8 +63,22 @@ ${content}
       temperature: 0.7,
     });
 
-    const resultText = response.choices[0]?.message?.content || '';
-    const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+    let resultText = response.choices[0]?.message?.content || '';
+    console.log('AI 原始返回:', resultText);  // 添加日志
+    
+    // 尝试多种方式提取 JSON
+    let jsonMatch = resultText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      // 如果没找到，尝试提取 summary 和 tags
+      const summaryMatch = resultText.match(/summary["']?\s*:\s*["']([^"']+)/);
+      const tagsMatch = resultText.match(/tags["']?\s*:\s*\[(.*?)\]/);
+      if (summaryMatch && tagsMatch) {
+        const summary = summaryMatch[1];
+        const tags = tagsMatch[1].split(',').map(t => t.trim().replace(/["']/g, ''));
+        return { summary, tags };
+      }
+    }
+    
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
@@ -74,7 +88,6 @@ ${content}
     return { summary: "AI 服务暂不可用", tags: [] };
   }
 }
-
 // ========== API 路由 ==========
 
 // 健康检查
