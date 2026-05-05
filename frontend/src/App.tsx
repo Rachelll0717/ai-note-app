@@ -12,7 +12,7 @@ interface Note {
   updated_at: string;
 }
 
-const API_URL = 'http://localhost:3001/api';
+const API_URL = 'https://ai-note-app-production.up.railway.app';
 
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
