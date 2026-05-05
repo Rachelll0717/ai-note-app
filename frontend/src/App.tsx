@@ -31,7 +31,7 @@ function App() {
   // 获取所有笔记
   const fetchNotes = async () => {
     try {
-      const response = await axios.get(`${API_URL}/notes`);
+      const response = await axios.get(`${API_URL}/api/notes`);
       setNotes(response.data);
     } catch (error) {
       console.error('Failed to fetch notes:', error);
@@ -66,7 +66,7 @@ function App() {
   const regenerateAI = async (id: string) => {
     setGeneratingId(id);
     try {
-      const response = await axios.post(`${API_URL}/notes/${id}/regenerate`);
+      const response = await axios.post(`${API_URL}/api/notes/${id}/regenerate`);
       setNotes(notes.map(note => 
         note.id === id ? response.data : note
       ));
@@ -83,7 +83,7 @@ function App() {
     if (!confirm('确定删除这篇笔记吗？')) return;
     
     try {
-      await axios.delete(`${API_URL}/notes/${id}`);
+      await axios.delete(`${API_URL}/api/notes/${id}`);
       setNotes(notes.filter(note => note.id !== id));
     } catch (error) {
       console.error('删除失败:', error);
@@ -105,7 +105,7 @@ function App() {
     
     setUpdating(true);
     try {
-      const response = await axios.put(`${API_URL}/notes/${editingNote.id}`, {
+      const response = await axios.put(`${API_URL}/api/notes/${editingNote.id}`, {
         title: editTitle,
         content: editContent,
       });
