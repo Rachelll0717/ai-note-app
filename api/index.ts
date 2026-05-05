@@ -3,26 +3,32 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+// 懒加载的客户端（避免顶层初始化阻塞）
+let supabase: any = null;
+let siliconflow: any = null;
+
+function getSupabase() {
+  if (!supabase) {
+    supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_ANON_KEY!
+    );
+  }
+  return supabase;
+}
+
+function getSiliconflow() {
+  if (!siliconflow) {
+    siliconflow = new OpenAI({
+      apiKey: process.env.SILICONFLOW_API_KEY,
+      baseURL: 'https://api.siliconflow.cn/v1',
+    });
+  }
+  return siliconflow;
+}
+
 const app = express();
 app.use(express.json());
-
-// 初始化 Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
-}
-const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
-
-// 初始化硅基流动
-const siliconflowApiKey = process.env.SILICONFLOW_API_KEY;
-if (!siliconflowApiKey) {
-  console.error('Missing SILICONFLOW_API_KEY environment variable');
-}
-const siliconflow = new OpenAI({
-  apiKey: siliconflowApiKey,
-  baseURL: 'https://api.siliconflow.cn/v1',
-});
 
 // AI 生成函数
 async function generateAISummaryAndTags(content: string) {
@@ -42,7 +48,8 @@ ${content}
 `;
 
   try {
-    const response = await siliconflow.chat.completions.create({
+    const client = getSiliconflow();
+    const response = await client.chat.completions.create({
       model: 'Qwen/Qwen2.5-7B-Instruct',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
@@ -60,16 +67,15 @@ ${content}
   }
 }
 
-// ========== API 路由 ==========
+// ========== 路由 ==========
 
-// 健康检查
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend is running' });
 });
 
-// 获取所有笔记
 app.get('/api/notes', async (req, res) => {
   try {
+    const supabase = getSupabase();
     const { data, error } = await supabase
       .from('notes')
       .select('*')
@@ -77,12 +83,10 @@ app.get('/api/notes', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
-    console.error('获取笔记失败:', error);
     res.status(500).json({ error: 'Failed to fetch notes' });
   }
 });
 
-// 创建笔记
 app.post('/api/notes', async (req, res) => {
   const { title, content } = req.body;
   if (!title || !content) {
@@ -90,6 +94,7 @@ app.post('/api/notes', async (req, res) => {
   }
 
   try {
+    const supabase = getSupabase();
     const { summary, tags } = await generateAISummaryAndTags(content);
     const { data, error } = await supabase
       .from('notes')
@@ -99,17 +104,16 @@ app.post('/api/notes', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
-    console.error('创建笔记失败:', error);
     res.status(500).json({ error: 'Failed to create note' });
   }
 });
 
-// 更新笔记
 app.put('/api/notes/:id', async (req, res) => {
   const { id } = req.params;
   const { title, content } = req.body;
 
   try {
+    const supabase = getSupabase();
     const { summary, tags } = await generateAISummaryAndTags(content);
     const { data, error } = await supabase
       .from('notes')
@@ -120,28 +124,26 @@ app.put('/api/notes/:id', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
-    console.error('更新笔记失败:', error);
     res.status(500).json({ error: 'Failed to update note' });
   }
 });
 
-// 删除笔记
 app.delete('/api/notes/:id', async (req, res) => {
   const { id } = req.params;
   try {
+    const supabase = getSupabase();
     const { error } = await supabase.from('notes').delete().eq('id', id);
     if (error) throw error;
     res.json({ success: true });
   } catch (error) {
-    console.error('删除笔记失败:', error);
     res.status(500).json({ error: 'Failed to delete note' });
   }
 });
 
-// 重新生成 AI
 app.post('/api/notes/:id/regenerate', async (req, res) => {
   const { id } = req.params;
   try {
+    const supabase = getSupabase();
     const { data: note, error: fetchError } = await supabase
       .from('notes')
       .select('content')
@@ -161,18 +163,12 @@ app.post('/api/notes/:id/regenerate', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
-    console.error('重新生成失败:', error);
     res.status(500).json({ error: 'Failed to regenerate' });
   }
 });
 
-// Vercel handler 导出
-
+// Vercel handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // 设置超时
-  req.setTimeout(30000);
-  res.setTimeout(30000);
-  
   try {
     await app(req, res);
   } catch (error) {
