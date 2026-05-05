@@ -167,6 +167,16 @@ app.post('/api/notes/:id/regenerate', async (req, res) => {
 });
 
 // Vercel handler 导出
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  await app(req, res);
+  // 设置超时
+  req.setTimeout(30000);
+  res.setTimeout(30000);
+  
+  try {
+    await app(req, res);
+  } catch (error) {
+    console.error('Handler error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 }
