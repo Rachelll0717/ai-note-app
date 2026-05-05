@@ -1,9 +1,9 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const app = express();
-
 app.use(express.json());
 
 // 初始化 Supabase
@@ -20,7 +20,20 @@ const siliconflow = new OpenAI({
 
 // AI 生成函数
 async function generateAISummaryAndTags(content: string) {
-  const prompt = `...`;  // 和之前一样
+  const prompt = `
+你是一个笔记助手。请分析以下笔记内容，完成两件事：
+1. 用一句话总结笔记的核心内容（不超过30个字）
+2. 生成3-5个关键词作为标签
+
+请严格按照以下 JSON 格式返回，不要有其他内容：
+{
+  "summary": "一句话总结",
+  "tags": ["标签1", "标签2", "标签3"]
+}
+
+笔记内容：
+${content}
+`;
 
   try {
     const response = await siliconflow.chat.completions.create({
@@ -32,22 +45,33 @@ async function generateAISummaryAndTags(content: string) {
     const resultText = response.choices[0]?.message?.content || '';
     const jsonMatch = resultText.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return { summary: "无法生成摘要", tags: [] };
+    return { summary: "无法解析AI响应", tags: [] };
   } catch (error) {
+    console.error("AI 调用失败:", error);
     return { summary: "AI 服务暂不可用", tags: [] };
   }
 }
 
-// API 路由
-app.get('/api/notes', async (req, res) => {
-  const { data, error } = await supabase
-    .from('notes')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ error });
-  res.json(data);
+// 健康检查
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Backend is running' });
 });
 
+// 获取所有笔记
+app.get('/api/notes', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('notes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch notes' });
+  }
+});
+
+// 创建笔记
 app.post('/api/notes', async (req, res) => {
   const { title, content } = req.body;
   if (!title || !content) {
@@ -64,10 +88,71 @@ app.post('/api/notes', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    console.error('创建笔记失败:', error);
     res.status(500).json({ error: 'Failed to create note' });
   }
 });
 
-// 其他路由同理（更新、删除、重新生成）
+// 更新笔记
+app.put('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  const { title, content } = req.body;
 
-export default app;
+  try {
+    const { summary, tags } = await generateAISummaryAndTags(content);
+    const { data, error } = await supabase
+      .from('notes')
+      .update({ title, content, summary, tags, updated_at: new Date() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update note' });
+  }
+});
+
+// 删除笔记
+app.delete('/api/notes/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { error } = await supabase.from('notes').delete().eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete note' });
+  }
+});
+
+// 重新生成 AI
+app.post('/api/notes/:id/regenerate', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data: note, error: fetchError } = await supabase
+      .from('notes')
+      .select('content')
+      .eq('id', id)
+      .single();
+    if (fetchError) throw fetchError;
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    const { summary, tags } = await generateAISummaryAndTags(note.content);
+    const { data, error } = await supabase
+      .from('notes')
+      .update({ summary, tags, updated_at: new Date() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to regenerate' });
+  }
+});
+
+// Vercel 需要导出的 handler
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  await app(req, res);
+}
