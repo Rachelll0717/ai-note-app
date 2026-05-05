@@ -47,7 +47,7 @@ function App() {
 
     setCreating(true);
     try {
-      const response = await axios.post(`${API_URL}/notes`, {
+      const response = await axios.post(`${API_URL}/api/notes`, {
         title: newTitle,
         content: newContent,
       });
