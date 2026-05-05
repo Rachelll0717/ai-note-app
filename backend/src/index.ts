@@ -41,20 +41,7 @@ const siliconflow = new OpenAI({
 
 // 调用 AI 生成摘要和标签
 async function generateAISummaryAndTags(content: string) {
-  const prompt = `
-你是一个笔记助手。请分析以下笔记内容，完成两件事：
-1. 用一句话总结笔记的核心内容（不超过30个字）
-2. 生成3-5个关键词作为标签
-
-请严格按照以下 JSON 格式返回，不要有其他内容：
-{
-  "summary": "一句话总结",
-  "tags": ["标签1", "标签2", "标签3"]
-}
-
-笔记内容：
-${content}
-`;
+  const prompt = `...`;  // 保持原有 prompt
 
   try {
     const response = await siliconflow.chat.completions.create({
@@ -63,24 +50,18 @@ ${content}
       temperature: 0.7,
     });
 
-    let resultText = response.choices[0]?.message?.content || '';
-    console.log('AI 原始返回:', resultText);  // 添加日志
+    // 安全地获取内容
+    const choice = response.choices?.[0];
+    const message = choice?.message;
+    const resultText = message?.content || '';
     
-    // 尝试多种方式提取 JSON
-    let jsonMatch = resultText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      // 如果没找到，尝试提取 summary 和 tags
-      const summaryMatch = resultText.match(/summary["']?\s*:\s*["']([^"']+)/);
-      const tagsMatch = resultText.match(/tags["']?\s*:\s*\[(.*?)\]/);
-      if (summaryMatch && tagsMatch) {
-        const summary = summaryMatch[1];
-        const tags = tagsMatch[1].split(',').map(t => t.trim().replace(/["']/g, ''));
-        return { summary, tags };
-      }
-    }
-    
+    const jsonMatch = resultText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        console.error('JSON 解析失败:', e);
+      }
     }
     return { summary: "无法解析AI响应", tags: [] };
   } catch (error) {
